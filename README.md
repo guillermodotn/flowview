@@ -1,5 +1,10 @@
 # flowview
 
+[![CI](https://github.com/guillermodotn/flowview/actions/workflows/ci.yml/badge.svg)](https://github.com/guillermodotn/flowview/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/flowview)](https://pypi.org/project/flowview/)
+[![Python](https://img.shields.io/pypi/pyversions/flowview)](https://pypi.org/project/flowview/)
+[![License](https://img.shields.io/github/license/guillermodotn/flowview)](https://github.com/guillermodotn/flowview/blob/main/LICENSE)
+
 Visual data pipeline debugger for Polars. Stop print-debugging your pipelines.
 
 <p align="center">
