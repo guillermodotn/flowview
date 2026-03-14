@@ -31,7 +31,7 @@ def render_trace(trace: PipelineTrace, config: dict[str, Any]) -> None:
         _render_input(trace.input_snapshot)
 
     # Pipeline steps
-    for i, step in enumerate(trace.steps):
+    for step in trace.steps:
         _render_arrow()
         _render_step(step, show_sample=show_sample, show_schema=show_schema)
 

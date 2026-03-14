@@ -23,7 +23,9 @@ class TestCaptureSnapshot:
         df1 = pl.DataFrame({"a": [1, 2, 3, 4, 5], "b": [10, 20, 30, 40, 50]})
         snap1 = capture_snapshot(df1, step_name="step1")
 
-        df2 = pl.DataFrame({"a": [1, 2, 3], "b": [10, 20, 30], "c": [True, False, True]})
+        df2 = pl.DataFrame(
+            {"a": [1, 2, 3], "b": [10, 20, 30], "c": [True, False, True]}
+        )
         snap2 = capture_snapshot(df2, step_name="step2", previous=snap1)
 
         assert snap2.row_diff == -2
@@ -110,5 +112,5 @@ class TestTimedCall:
             return 42  # type: ignore[return-value]
 
         df = pl.DataFrame({"a": [1]})
-        with pytest.raises(TypeError, match="expected polars.DataFrame"):
+        with pytest.raises(TypeError, match=r"expected polars\.DataFrame"):
             timed_call(bad_step, df)

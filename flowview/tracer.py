@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import contextvars
 import functools
-from typing import Any, Callable, TypeVar, overload
+from collections.abc import Callable
+from typing import Any, TypeVar, overload
 
 import polars as pl
 
 from flowview.collector import capture_snapshot, timed_call
-from flowview.models import PipelineTrace, StepSnapshot
+from flowview.models import PipelineTrace
 from flowview.renderer import render_trace
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -18,8 +19,8 @@ F = TypeVar("F", bound=Callable[..., Any])
 _active_trace: contextvars.ContextVar[PipelineTrace | None] = contextvars.ContextVar(
     "_active_trace", default=None
 )
-_trace_config: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
-    "_trace_config", default={}
+_trace_config: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_trace_config", default=None
 )
 
 # Store the original pipe method
@@ -39,7 +40,7 @@ def _traced_pipe(
         # No active trace — fall through to original
         return _original_pipe(self, function, *args, **kwargs)
 
-    config = _trace_config.get({})
+    config = _trace_config.get(None) or {}
     sample_rows = config.get("sample_rows", 5)
 
     # Get the previous snapshot for diffing
@@ -136,9 +137,7 @@ def trace(
 
                 start = time.perf_counter()
                 result = func(*args, **kwargs)
-                pipeline_trace.total_time_ms = (
-                    time.perf_counter() - start
-                ) * 1000
+                pipeline_trace.total_time_ms = (time.perf_counter() - start) * 1000
             finally:
                 # Always restore
                 pl.DataFrame.pipe = _original_pipe  # type: ignore[assignment]

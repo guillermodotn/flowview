@@ -18,7 +18,9 @@ def clean_columns(df: pl.DataFrame) -> pl.DataFrame:
     """Normalize column names and trim string fields."""
     renamed = df.rename({col: col.lower().replace(" ", "_") for col in df.columns})
     str_cols = [
-        col for col, dtype in zip(renamed.columns, renamed.dtypes) if dtype == pl.String
+        col
+        for col, dtype in zip(renamed.columns, renamed.dtypes, strict=True)
+        if dtype == pl.String
     ]
     return renamed.with_columns([pl.col(c).str.strip_chars() for c in str_cols])
 

@@ -32,10 +32,7 @@ def top_categories(df: pl.DataFrame) -> pl.DataFrame:
 def process_sales(df: pl.DataFrame) -> pl.DataFrame:
     """Full sales processing pipeline."""
     return (
-        df.pipe(clean_names)
-        .pipe(filter_active)
-        .pipe(add_revenue)
-        .pipe(top_categories)
+        df.pipe(clean_names).pipe(filter_active).pipe(add_revenue).pipe(top_categories)
     )
 
 

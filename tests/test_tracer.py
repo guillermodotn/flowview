@@ -1,5 +1,7 @@
 """Tests for flowview.tracer."""
 
+import contextlib
+
 import polars as pl
 
 import flowview as fv
@@ -65,10 +67,8 @@ class TestTraceDecorator:
             return df.pipe(bad_step)
 
         df = pl.DataFrame({"value": [1]})
-        try:
+        with contextlib.suppress(ValueError):
             pipeline(df)
-        except ValueError:
-            pass
 
         # pipe should still be restored
         assert pl.DataFrame.pipe is _original_pipe

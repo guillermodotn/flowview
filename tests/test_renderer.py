@@ -1,7 +1,6 @@
 """Tests for flowview.renderer."""
 
 import polars as pl
-from rich.console import Console
 
 from flowview.models import PipelineTrace, SchemaDiff, StepSnapshot
 from flowview.renderer import (

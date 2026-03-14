@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import polars as pl
 
@@ -18,7 +19,7 @@ def capture_snapshot(
     previous: StepSnapshot | None = None,
 ) -> StepSnapshot:
     """Capture the current state of a DataFrame as a StepSnapshot."""
-    schema = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)}
+    schema = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes, strict=True)}
     sample = df.head(sample_rows)
     row_count = df.shape[0]
     col_count = df.shape[1]
