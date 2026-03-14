@@ -31,6 +31,12 @@ def process(df: pl.DataFrame) -> pl.DataFrame:
           .pipe(add_revenue)
     )
 
+df = pl.DataFrame({
+    "status": ["active", "inactive", "active"],
+    "price": [10.0, 20.0, 30.0],
+    "quantity": [2, 1, 3],
+})
+
 result = process(df)
 ```
 
