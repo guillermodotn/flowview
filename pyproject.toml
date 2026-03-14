@@ -5,7 +5,7 @@ description = "Visual data pipeline debugger for Polars — stop print-debugging
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "gleiro" }]
+authors = [{ name = "guillermodotn" }]
 keywords = ["polars", "debugging", "data-pipeline", "visualization", "terminal"]
 classifiers = [
     "Development Status :: 3 - Alpha",
