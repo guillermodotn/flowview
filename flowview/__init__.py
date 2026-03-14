@@ -19,7 +19,7 @@ Usage:
         ...
 """
 
+from flowview._version import __version__
 from flowview.tracer import trace
 
-__all__ = ["trace"]
-__version__ = "0.1.0"
+__all__ = ["trace", "__version__"]

@@ -6,6 +6,7 @@ __pycache__/
 *.egg
 dist/
 build/
+flowview/_version.py
 
 # Virtual environments
 .venv/
