@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextvars
 import functools
+import time
+import warnings
 from collections.abc import Callable
 from typing import Any, TypeVar, overload
 
@@ -15,7 +17,7 @@ from flowview.renderer import render_trace
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-# Context variable to track the active trace (supports nesting)
+# Context variable to track the active trace
 _active_trace: contextvars.ContextVar[PipelineTrace | None] = contextvars.ContextVar(
     "_active_trace", default=None
 )
@@ -133,8 +135,6 @@ def trace(
             pl.DataFrame.pipe = _traced_pipe  # type: ignore[assignment]
 
             try:
-                import time
-
                 start = time.perf_counter()
                 result = func(*args, **kwargs)
                 pipeline_trace.total_time_ms = (time.perf_counter() - start) * 1000
@@ -144,8 +144,15 @@ def trace(
                 _active_trace.reset(token_trace)
                 _trace_config.reset(token_config)
 
-            # Render the trace
-            render_trace(pipeline_trace, config)
+            # Render the trace — never let a rendering error lose the result
+            try:
+                render_trace(pipeline_trace, config)
+            except Exception as e:
+                warnings.warn(
+                    f"flowview: failed to render trace: {e}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
             return result
 
