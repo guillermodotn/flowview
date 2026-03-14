@@ -2,6 +2,10 @@
 
 Visual data pipeline debugger for Polars. Stop print-debugging your pipelines.
 
+<p align="center">
+  <img src="assets/demo.svg" alt="flowview demo" width="800">
+</p>
+
 ## Install
 
 ```bash
