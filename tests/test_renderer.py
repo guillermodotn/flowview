@@ -14,7 +14,7 @@ from flowview.renderer import (
 
 class TestFormatTime:
     def test_microseconds(self):
-        assert _format_time(0.5) == "500us"
+        assert _format_time(0.5) == "500µs"
 
     def test_milliseconds(self):
         assert _format_time(42.3) == "42.3ms"
@@ -39,6 +39,10 @@ class TestFormatCell:
 
     def test_int(self):
         assert _format_cell(1000) == "1,000"
+
+    def test_bool(self):
+        assert _format_cell(True) == "True"
+        assert _format_cell(False) == "False"
 
     def test_string(self):
         assert _format_cell("hello") == "hello"

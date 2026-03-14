@@ -158,7 +158,7 @@ def _format_shape(rows: int, cols: int) -> str:
 def _format_time(ms: float) -> str:
     """Format milliseconds into a readable string."""
     if ms < 1:
-        return f"{ms * 1000:.0f}us"
+        return f"{ms * 1000:.0f}µs"
     if ms < 1000:
         return f"{ms:.1f}ms"
     return f"{ms / 1000:.2f}s"
@@ -189,6 +189,8 @@ def _format_cell(value: Any) -> str:
     """Format a cell value for display."""
     if value is None:
         return "[dim]null[/dim]"
+    if isinstance(value, bool):
+        return str(value)
     if isinstance(value, float):
         return f"{value:,.2f}"
     if isinstance(value, int):
