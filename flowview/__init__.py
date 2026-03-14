@@ -22,4 +22,4 @@ Usage:
 from flowview._version import __version__
 from flowview.tracer import trace
 
-__all__ = ["trace", "__version__"]
+__all__ = ["__version__", "trace"]
