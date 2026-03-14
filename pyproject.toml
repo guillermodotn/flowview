@@ -23,6 +23,11 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/guillermodotn/flowview"
+Repository = "https://github.com/guillermodotn/flowview"
+Issues = "https://github.com/guillermodotn/flowview/issues"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
