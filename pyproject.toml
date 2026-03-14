@@ -38,6 +38,7 @@ build-backend = "hatchling.build"
 include = [
     "flowview/",
     "tests/",
+    "LICENSE",
     "README.md",
     "pyproject.toml",
 ]
