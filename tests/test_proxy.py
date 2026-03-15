@@ -471,3 +471,202 @@ class TestSampleCapture:
         step = _get_trace(result).steps[0]
         assert step.sample.shape[0] > 0
         assert step.sample.columns == ["status", "category", "price", "quantity", "id"]
+
+
+# ------------------------------------------------------------------
+# Pipe handling
+# ------------------------------------------------------------------
+
+
+class TestPipeHandling:
+    def test_pipe_uses_function_name(self, traced: TracedDataFrame):
+        def clean_data(df: pl.DataFrame) -> pl.DataFrame:
+            return df.filter(pl.col("status") == "active")
+
+        result = traced.pipe(clean_data)
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 1
+        assert trace.steps[0].step_name == "clean_data"
+
+    def test_pipe_with_lambda(self, traced: TracedDataFrame):
+        result = traced.pipe(lambda df: df.head(3))
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 1
+        assert trace.steps[0].step_name == "<lambda>"
+        assert trace.steps[0].row_count == 3
+
+    def test_pipe_with_extra_args(self, traced: TracedDataFrame):
+        def top_n(df: pl.DataFrame, n: int) -> pl.DataFrame:
+            return df.head(n)
+
+        result = traced.pipe(top_n, 2)
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 1
+        assert trace.steps[0].step_name == "top_n"
+        assert trace.steps[0].row_count == 2
+
+    def test_pipe_with_kwargs(self, traced: TracedDataFrame):
+        def top_n(df: pl.DataFrame, n: int = 3) -> pl.DataFrame:
+            return df.head(n)
+
+        result = traced.pipe(top_n, n=2)
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 1
+        assert trace.steps[0].row_count == 2
+
+    def test_pipe_returns_proxy(self, traced: TracedDataFrame):
+        result = traced.pipe(lambda df: df.head(3))
+        assert type(result) is TracedDataFrame
+        assert isinstance(result, pl.DataFrame)
+
+    def test_pipe_passes_real_df(self, traced: TracedDataFrame):
+        """Pipe should pass the real DataFrame, not the proxy, to the function."""
+        received_types = []
+
+        def check_type(df: pl.DataFrame) -> pl.DataFrame:
+            received_types.append(type(df))
+            return df
+
+        traced.pipe(check_type)
+        assert received_types[0] is pl.DataFrame
+
+    def test_pipe_chaining(self, traced: TracedDataFrame):
+        def step_a(df: pl.DataFrame) -> pl.DataFrame:
+            return df.head(4)
+
+        def step_b(df: pl.DataFrame) -> pl.DataFrame:
+            return df.head(3)
+
+        result = traced.pipe(step_a).pipe(step_b)
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 2
+        assert trace.steps[0].step_name == "step_a"
+        assert trace.steps[1].step_name == "step_b"
+
+
+# ------------------------------------------------------------------
+# GroupBy handling
+# ------------------------------------------------------------------
+
+
+class TestGroupByHandling:
+    def test_groupby_agg_captures_combined_step(self, traced: TracedDataFrame):
+        result = traced.group_by("category").agg(
+            pl.col("price").sum().alias("total_price")
+        )
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 1
+        step = trace.steps[0]
+        assert "group_by" in step.step_name
+        assert "category" in step.step_name
+
+    def test_groupby_agg_returns_proxy(self, traced: TracedDataFrame):
+        result = traced.group_by("category").agg(
+            pl.col("price").sum().alias("total_price")
+        )
+        assert type(result) is TracedDataFrame
+        assert isinstance(result, pl.DataFrame)
+
+    def test_groupby_agg_data_correct(self, traced: TracedDataFrame):
+        result = traced.group_by("category").agg(
+            pl.col("price").sum().alias("total_price")
+        )
+        real_df = unwrap(result)
+        assert type(real_df) is pl.DataFrame
+        assert real_df.shape[0] == 2  # A and B
+
+    def test_groupby_multiple_columns(self, traced: TracedDataFrame):
+        result = traced.group_by("status", "category").agg(
+            pl.col("price").sum().alias("total_price")
+        )
+        trace = _get_trace(result)
+
+        step = trace.steps[0]
+        assert "status" in step.step_name
+        assert "category" in step.step_name
+
+    def test_groupby_agg_timing(self, traced: TracedDataFrame):
+        result = traced.group_by("category").agg(
+            pl.col("price").sum().alias("total_price")
+        )
+        step = _get_trace(result).steps[0]
+        assert step.execution_time_ms >= 0
+
+    def test_groupby_step_name_format(self, traced: TracedDataFrame):
+        result = traced.group_by("category").agg(
+            pl.col("price").sum().alias("total_price")
+        )
+        step = _get_trace(result).steps[0]
+        assert step.step_name == "group_by(category).agg"
+
+    def test_groupby_multiple_cols_step_name(self, traced: TracedDataFrame):
+        result = traced.group_by("status", "category").agg(pl.col("price").sum())
+        step = _get_trace(result).steps[0]
+        assert step.step_name == "group_by(status, category).agg"
+
+
+# ------------------------------------------------------------------
+# Mixed pipe and method chain
+# ------------------------------------------------------------------
+
+
+class TestMixedPipeAndMethodChain:
+    def test_pipe_then_method_chain(self, traced: TracedDataFrame):
+        def clean(df: pl.DataFrame) -> pl.DataFrame:
+            return df.filter(pl.col("status") == "active")
+
+        result = traced.pipe(clean).sort("price")
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 2
+        assert trace.steps[0].step_name == "clean"
+        assert trace.steps[1].step_name == "sort"
+
+    def test_method_chain_then_pipe(self, traced: TracedDataFrame):
+        def aggregate(df: pl.DataFrame) -> pl.DataFrame:
+            return df.group_by("category").agg(pl.col("price").sum())
+
+        result = traced.filter(pl.col("status") == "active").pipe(aggregate)
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 2
+        assert trace.steps[0].step_name == "filter"
+        assert trace.steps[1].step_name == "aggregate"
+
+    def test_method_chain_then_groupby(self, traced: TracedDataFrame):
+        result = (
+            traced.filter(pl.col("status") == "active")
+            .group_by("category")
+            .agg(pl.col("price").sum().alias("total"))
+        )
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 2
+        assert trace.steps[0].step_name == "filter"
+        assert "group_by" in trace.steps[1].step_name
+
+    def test_full_mixed_pipeline(self, traced: TracedDataFrame):
+        def add_revenue(df: pl.DataFrame) -> pl.DataFrame:
+            return df.with_columns(
+                (pl.col("price") * pl.col("quantity")).alias("revenue")
+            )
+
+        result = (
+            traced.filter(pl.col("status") == "active")
+            .pipe(add_revenue)
+            .sort("revenue", descending=True)
+            .head(2)
+        )
+        trace = _get_trace(result)
+
+        assert len(trace.steps) == 4
+        assert trace.steps[0].step_name == "filter"
+        assert trace.steps[1].step_name == "add_revenue"
+        assert trace.steps[2].step_name == "sort"
+        assert trace.steps[3].step_name == "head"

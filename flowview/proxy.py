@@ -65,13 +65,25 @@ class TracedDataFrame:
     # Core interception
     # ------------------------------------------------------------------
 
+    _GROUPBY_METHODS = frozenset({"group_by", "group_by_dynamic", "rolling"})
+
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._df, name)
 
         if not callable(attr):
             return attr
 
+        if name == "pipe":
+            return self._make_pipe_wrapper()
+
+        if name in self._GROUPBY_METHODS:
+            return self._make_groupby_wrapper(name, attr)
+
         return self._make_traced_wrapper(name, attr)
+
+    # ------------------------------------------------------------------
+    # Generic method wrapper
+    # ------------------------------------------------------------------
 
     def _make_traced_wrapper(self, method_name: str, method: Any) -> Any:
         """Create a wrapper that traces a method call if it returns a DataFrame."""
@@ -102,6 +114,79 @@ class TracedDataFrame:
 
         return wrapper
 
+    # ------------------------------------------------------------------
+    # Pipe wrapper
+    # ------------------------------------------------------------------
+
+    def _make_pipe_wrapper(self) -> Any:
+        """Wrap ``.pipe()`` using the function name as step label."""
+        proxy = self
+
+        def wrapper(function: Any, *args: Any, **kwargs: Any) -> Any:
+            step_name = getattr(function, "__name__", str(function))
+
+            start = time.perf_counter()
+            result = function(proxy._df, *args, **kwargs)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+
+            if isinstance(result, pl.DataFrame):
+                previous = _get_previous(proxy._trace, proxy._df)
+                snapshot = capture_snapshot(
+                    result,
+                    step_name=step_name,
+                    execution_time_ms=elapsed_ms,
+                    sample_rows=proxy._sample_rows,
+                    previous=previous,
+                )
+                proxy._trace.steps.append(snapshot)
+                return TracedDataFrame(result, proxy._trace, proxy._sample_rows)
+
+            return result
+
+        return wrapper
+
+    # ------------------------------------------------------------------
+    # GroupBy wrapper
+    # ------------------------------------------------------------------
+
+    def _make_groupby_wrapper(self, method_name: str, method: Any) -> Any:
+        """Create a wrapper for group_by methods that traces the combined step."""
+        proxy = self
+
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            start = time.perf_counter()
+            gb_result = method(*args, **kwargs)
+
+            # Patch .agg() on the returned GroupBy object
+            original_agg = gb_result.agg
+
+            def traced_agg(*agg_args: Any, **agg_kwargs: Any) -> Any:
+                result = original_agg(*agg_args, **agg_kwargs)
+                elapsed_ms = (time.perf_counter() - start) * 1000
+
+                if isinstance(result, pl.DataFrame):
+                    # Build combined step name: group_by(col1, col2).agg(...)
+                    by_cols = _format_groupby_cols(gb_result)
+                    step_name = f"{method_name}({by_cols}).agg"
+
+                    previous = _get_previous(proxy._trace, proxy._df)
+                    snapshot = capture_snapshot(
+                        result,
+                        step_name=step_name,
+                        execution_time_ms=elapsed_ms,
+                        sample_rows=proxy._sample_rows,
+                        previous=previous,
+                    )
+                    proxy._trace.steps.append(snapshot)
+                    return TracedDataFrame(result, proxy._trace, proxy._sample_rows)
+
+                return result
+
+            gb_result.agg = traced_agg
+            return gb_result
+
+        return wrapper
+
 
 # ------------------------------------------------------------------
 # Helpers
@@ -125,3 +210,14 @@ def _get_previous(
     if trace.input_snapshot:
         return trace.input_snapshot
     return None
+
+
+def _format_groupby_cols(gb: Any) -> str:
+    """Extract grouping column names from a GroupBy-like object."""
+    try:
+        by = gb.by  # type: ignore[attr-defined]
+        if isinstance(by, (list, tuple)):
+            return ", ".join(str(c) for c in by)
+        return str(by)
+    except Exception:
+        return "..."
