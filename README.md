@@ -19,39 +19,34 @@ pip install flowview
 
 ## Usage
 
+Add `@fv.trace` to any function that transforms a Polars DataFrame. flowview traces every method call and renders a visual flow in your terminal.
+
 ```python
 import polars as pl
 import flowview as fv
 
-def clean(df: pl.DataFrame) -> pl.DataFrame:
-    return df.rename({col: col.lower() for col in df.columns})
-
-def filter_active(df: pl.DataFrame) -> pl.DataFrame:
-    return df.filter(pl.col("status") == "active")
-
-def add_revenue(df: pl.DataFrame) -> pl.DataFrame:
-    return df.with_columns((pl.col("price") * pl.col("quantity")).alias("revenue"))
-
 @fv.trace
 def process(df: pl.DataFrame) -> pl.DataFrame:
     return (
-        df.pipe(clean)
-          .pipe(filter_active)
-          .pipe(add_revenue)
+        df.filter(pl.col("status") == "active")
+          .with_columns((pl.col("price") * pl.col("quantity")).alias("revenue"))
+          .group_by("category")
+          .agg(pl.col("revenue").sum().alias("total_revenue"))
+          .sort("total_revenue", descending=True)
     )
-
-df = pl.DataFrame({
-    "status": ["active", "inactive", "active"],
-    "price": [10.0, 20.0, 30.0],
-    "quantity": [2, 1, 3],
-})
-
-result = process(df)
 ```
 
-The `@fv.trace` decorator intercepts each `.pipe()` call and renders a visual flow in your terminal showing:
+`.pipe()` chains are also supported:
 
-- Row counts at each step (with diffs)
+```python
+@fv.trace
+def process(df: pl.DataFrame) -> pl.DataFrame:
+    return df.pipe(clean).pipe(filter_active).pipe(add_revenue)
+```
+
+Each step shows:
+
+- Row counts with diffs
 - Schema changes (added/removed columns)
 - Sample data at each transformation
 - Execution time per step

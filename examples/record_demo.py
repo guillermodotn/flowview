@@ -11,28 +11,19 @@ recording_console = Console(record=True, width=90)
 renderer.console = recording_console
 
 
-# --- Pipeline steps ---
+# --- Traced pipeline ---
 
 
-def clean_names(df: pl.DataFrame) -> pl.DataFrame:
-    """Normalize column names to lowercase."""
-    return df.rename({col: col.lower().replace(" ", "_") for col in df.columns})
-
-
-def filter_active(df: pl.DataFrame) -> pl.DataFrame:
-    """Keep only active records."""
-    return df.filter(pl.col("status") == "active")
-
-
-def add_revenue(df: pl.DataFrame) -> pl.DataFrame:
-    """Calculate revenue from price and quantity."""
-    return df.with_columns((pl.col("price") * pl.col("quantity")).alias("revenue"))
-
-
-def top_categories(df: pl.DataFrame) -> pl.DataFrame:
-    """Aggregate revenue by category."""
+@fv.trace(sample_rows=3)
+def process_sales(df: pl.DataFrame) -> pl.DataFrame:
+    """Sales pipeline using method chains."""
     return (
-        df.group_by("category")
+        df.filter(pl.col("status") == "active")
+        .with_columns(
+            (pl.col("price") * pl.col("quantity")).alias("revenue"),
+            pl.col("category").str.to_lowercase().alias("category"),
+        )
+        .group_by("category")
         .agg(
             pl.col("revenue").sum().alias("total_revenue"),
             pl.len().alias("order_count"),
@@ -41,35 +32,11 @@ def top_categories(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-# --- Traced pipeline ---
-
-
-@fv.trace(sample_rows=3)
-def process_sales(df: pl.DataFrame) -> pl.DataFrame:
-    """Full sales processing pipeline."""
-    return (
-        df.pipe(clean_names).pipe(filter_active).pipe(add_revenue).pipe(top_categories)
-    )
-
-
 # --- Run and record ---
 
 df = pl.DataFrame(
     {
-        "Category": [
-            "Electronics",
-            "Books",
-            "Electronics",
-            "Clothing",
-            "Books",
-            "Electronics",
-            "Clothing",
-            "Books",
-            "Electronics",
-            "Books",
-        ]
-        * 100,
-        "Status": [
+        "status": [
             "active",
             "active",
             "inactive",
@@ -82,7 +49,20 @@ df = pl.DataFrame(
             "cancelled",
         ]
         * 100,
-        "Price": [
+        "category": [
+            "Electronics",
+            "Books",
+            "Electronics",
+            "Clothing",
+            "Books",
+            "Electronics",
+            "Clothing",
+            "Books",
+            "Electronics",
+            "Books",
+        ]
+        * 100,
+        "price": [
             299.99,
             14.99,
             599.99,
@@ -95,7 +75,7 @@ df = pl.DataFrame(
             9.99,
         ]
         * 100,
-        "Quantity": [2, 5, 1, 3, 4, 1, 2, 6, 1, 3] * 100,
+        "quantity": [2, 5, 1, 3, 4, 1, 2, 6, 1, 3] * 100,
     }
 )
 
