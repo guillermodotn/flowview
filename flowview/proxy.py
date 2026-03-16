@@ -99,10 +99,11 @@ class TracedDataFrame:
             elapsed_ms = (time.perf_counter() - start) * 1000
 
             if isinstance(result, pl.DataFrame):
+                step_name = _summarize_step(method_name, clean_args, clean_kwargs)
                 previous = _get_previous(proxy._trace, proxy._df)
                 snapshot = capture_snapshot(
                     result,
-                    step_name=method_name,
+                    step_name=step_name,
                     execution_time_ms=elapsed_ms,
                     sample_rows=proxy._sample_rows,
                     previous=previous,
@@ -165,9 +166,12 @@ class TracedDataFrame:
                 elapsed_ms = (time.perf_counter() - start) * 1000
 
                 if isinstance(result, pl.DataFrame):
-                    # Build combined step name: group_by(col1, col2).agg(...)
-                    by_cols = _format_groupby_cols(gb_result)
-                    step_name = f"{method_name}({by_cols}).agg"
+                    step_name = _summarize_groupby(
+                        method_name,
+                        gb_result,
+                        agg_args,
+                        agg_kwargs,
+                    )
 
                     previous = _get_previous(proxy._trace, proxy._df)
                     snapshot = capture_snapshot(
@@ -221,3 +225,221 @@ def _format_groupby_cols(gb: Any) -> str:
         return str(by)
     except Exception:
         return "..."
+
+
+# ------------------------------------------------------------------
+# Expression summarizer
+# ------------------------------------------------------------------
+
+_MAX_STEP_NAME_LEN = 60
+
+
+def _truncate(s: str, max_len: int = _MAX_STEP_NAME_LEN) -> str:
+    """Truncate a string with ``...`` suffix if it exceeds *max_len*."""
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 3] + "..."
+
+
+def _safe_repr(obj: Any, max_len: int = 45) -> str:
+    """Return ``repr(obj)`` truncated, never raising."""
+    try:
+        return _truncate(repr(obj), max_len)
+    except Exception:
+        return "?"
+
+
+def _expr_output_names(args: tuple[Any, ...], kwargs: dict[str, Any]) -> list[str]:
+    """Collect output column names from expression args and kwargs.
+
+    Shared by ``with_columns``, ``select``, and ``group_by().agg()``.
+    """
+    names: list[str] = []
+    for arg in args:
+        if isinstance(arg, str):
+            names.append(arg)
+        elif isinstance(arg, pl.Expr):
+            try:
+                names.append(arg.meta.output_name())
+            except Exception:
+                names.append(str(arg))
+        elif isinstance(arg, (list, tuple)):
+            # with_columns([expr1, expr2]) passes a list as first arg
+            for item in arg:
+                if isinstance(item, str):
+                    names.append(item)
+                elif isinstance(item, pl.Expr):
+                    try:
+                        names.append(item.meta.output_name())
+                    except Exception:
+                        names.append(str(item))
+    for name in kwargs:
+        names.append(name)  # kwargs key IS the output name
+    return names
+
+
+# -- Method-specific summarizers -----------------------------------------
+
+
+def _summarize_filter(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    """``filter(col("status") == "active")``."""
+    if not args:
+        return "filter"
+    text = str(args[0])
+    # str(expr) wraps in outer [] — strip them for readability
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return f"filter({_truncate(text, 45)})"
+
+
+def _summarize_with_columns(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    names = _expr_output_names(args, kwargs)
+    if not names:
+        return "with_columns"
+    return f"with_columns({', '.join(names)})"
+
+
+def _summarize_select(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    names = _expr_output_names(args, kwargs)
+    if not names:
+        return "select"
+    return f"select({', '.join(names)})"
+
+
+def _summarize_drop(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    names = [str(a) for a in args if isinstance(a, str)]
+    if not names:
+        return "drop"
+    return f"drop({', '.join(names)})"
+
+
+def _summarize_rename(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    if args and isinstance(args[0], dict):
+        pairs = [f"{old}->{new}" for old, new in args[0].items()]
+        return f"rename({', '.join(pairs)})"
+    return "rename"
+
+
+def _summarize_sort(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    names: list[str] = []
+    for a in args:
+        if isinstance(a, str):
+            names.append(a)
+        elif isinstance(a, pl.Expr):
+            try:
+                names.append(a.meta.output_name())
+            except Exception:
+                names.append(str(a))
+    if not names:
+        return "sort"
+    return f"sort({', '.join(names)})"
+
+
+def _summarize_numeric(
+    method_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> str:
+    """``head(5)``, ``tail(10)``, ``limit(100)``, ``slice(0, 10)``."""
+    nums = [str(a) for a in args if isinstance(a, (int, float))]
+    if nums:
+        return f"{method_name}({', '.join(nums)})"
+    return method_name
+
+
+def _summarize_unique(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    subset = kwargs.get("subset") or (args[0] if args else None)
+    if subset is None:
+        return "unique"
+    if isinstance(subset, str):
+        return f"unique({subset})"
+    if isinstance(subset, (list, tuple)):
+        return f"unique({', '.join(str(s) for s in subset)})"
+    return "unique"
+
+
+def _summarize_join(
+    method_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> str:
+    parts: list[str] = []
+    on = kwargs.get("on") or kwargs.get("left_on")
+    if on is not None:
+        on_key = "on" if "on" in kwargs else "left_on"
+        if isinstance(on, (list, tuple)):
+            parts.append(f"{on_key}={', '.join(str(c) for c in on)}")
+        else:
+            parts.append(f"{on_key}={on}")
+    how = kwargs.get("how")
+    if how is not None:
+        parts.append(f"how={how}")
+    if parts:
+        return f"{method_name}({', '.join(parts)})"
+    return method_name
+
+
+# -- Dispatch table -------------------------------------------------------
+
+_SUMMARIZERS: dict[
+    str,
+    Any,  # callable
+] = {
+    "filter": lambda a, k: _summarize_filter(a, k),
+    "with_columns": lambda a, k: _summarize_with_columns(a, k),
+    "select": lambda a, k: _summarize_select(a, k),
+    "drop": lambda a, k: _summarize_drop(a, k),
+    "rename": lambda a, k: _summarize_rename(a, k),
+    "sort": lambda a, k: _summarize_sort(a, k),
+    "head": lambda a, k: _summarize_numeric("head", a, k),
+    "tail": lambda a, k: _summarize_numeric("tail", a, k),
+    "limit": lambda a, k: _summarize_numeric("limit", a, k),
+    "slice": lambda a, k: _summarize_numeric("slice", a, k),
+    "sample": lambda a, k: _summarize_numeric("sample", a, k),
+    "unique": lambda a, k: _summarize_unique(a, k),
+    "join": lambda a, k: _summarize_join("join", a, k),
+    "join_asof": lambda a, k: _summarize_join("join_asof", a, k),
+}
+
+
+def _summarize_step(
+    method_name: str,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> str:
+    """Generate a readable step name from a method call.
+
+    Fallback chain:
+    1. Method-specific summarizer
+    2. ``method_name(str(args[0]))`` truncated
+    3. Bare method name
+    """
+    try:
+        summarizer = _SUMMARIZERS.get(method_name)
+        if summarizer is not None:
+            return _truncate(summarizer(args, kwargs))
+        # Fallback: show first arg if available
+        if args:
+            first = _safe_repr(args[0], 45)
+            return _truncate(f"{method_name}({first})")
+        return method_name
+    except Exception:
+        return method_name
+
+
+def _summarize_groupby(
+    method_name: str,
+    gb_result: Any,
+    agg_args: tuple[Any, ...],
+    agg_kwargs: dict[str, Any],
+) -> str:
+    """``group_by(category).agg(total_revenue, count)``."""
+    try:
+        by_cols = _format_groupby_cols(gb_result)
+        agg_names = _expr_output_names(agg_args, agg_kwargs)
+        if agg_names:
+            agg_part = ", ".join(agg_names)
+            return _truncate(f"{method_name}({by_cols}).agg({agg_part})")
+        return _truncate(f"{method_name}({by_cols}).agg")
+    except Exception:
+        return f"{method_name}(...).agg"

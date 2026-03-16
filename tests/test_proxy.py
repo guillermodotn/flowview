@@ -138,7 +138,7 @@ class TestTraceFilter:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "filter"
+        assert step.step_name == 'filter((col("status")) == ("active"))'
         assert step.row_count == 3
         assert step.execution_time_ms >= 0
 
@@ -178,7 +178,7 @@ class TestTraceWithColumns:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "with_columns"
+        assert step.step_name == "with_columns(revenue)"
         assert step.col_count == 6  # original 5 + revenue
 
     def test_with_columns_schema_diff(self, traced: TracedDataFrame):
@@ -228,7 +228,7 @@ class TestTraceSelect:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "select"
+        assert step.step_name == "select(status, price)"
         assert step.col_count == 2
 
     def test_select_with_expr(self, traced: TracedDataFrame):
@@ -249,7 +249,7 @@ class TestTraceDrop:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "drop"
+        assert step.step_name == "drop(status, category)"
         assert step.col_count == 3  # 5 - 2
 
 
@@ -265,7 +265,7 @@ class TestTraceRename:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "rename"
+        assert step.step_name == "rename(price->unit_price)"
         assert "unit_price" in step.schema
         assert "price" not in step.schema
 
@@ -282,7 +282,7 @@ class TestTraceSort:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "sort"
+        assert step.step_name == "sort(price)"
         assert step.row_count == 5  # same row count
         assert step.col_count == 5  # same col count
 
@@ -299,7 +299,7 @@ class TestTraceHeadTail:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "head"
+        assert step.step_name == "head(3)"
         assert step.row_count == 3
 
     def test_tail_captures_step(self, traced: TracedDataFrame):
@@ -322,7 +322,7 @@ class TestTraceUnique:
 
         assert len(trace.steps) == 1
         step = trace.steps[0]
-        assert step.step_name == "unique"
+        assert step.step_name == "unique(category)"
         assert step.row_count == 2  # "A" and "B"
 
 
@@ -341,9 +341,9 @@ class TestChaining:
         trace = _get_trace(result)
 
         assert len(trace.steps) == 3
-        assert trace.steps[0].step_name == "filter"
-        assert trace.steps[1].step_name == "with_columns"
-        assert trace.steps[2].step_name == "sort"
+        assert "filter(" in trace.steps[0].step_name
+        assert trace.steps[1].step_name == "with_columns(revenue)"
+        assert trace.steps[2].step_name == "sort(revenue)"
 
     def test_chain_preserves_data(self, traced: TracedDataFrame):
         result = traced.filter(pl.col("status") == "active").select("status", "price")
@@ -410,7 +410,7 @@ class TestArgUnwrapping:
         trace = _get_trace(result)
 
         assert len(trace.steps) == 1
-        assert trace.steps[0].step_name == "join"
+        assert trace.steps[0].step_name == "join(on=id, how=left)"
 
     def test_join_with_proxy_as_other(self, sample_df: pl.DataFrame):
         """When a proxied DataFrame is passed as the 'other' arg to join,
@@ -428,7 +428,7 @@ class TestArgUnwrapping:
 
         trace = _get_trace(result)
         assert len(trace.steps) == 1
-        assert trace.steps[0].step_name == "join"
+        assert trace.steps[0].step_name == "join(on=id, how=left)"
 
 
 # ------------------------------------------------------------------
@@ -603,12 +603,12 @@ class TestGroupByHandling:
             pl.col("price").sum().alias("total_price")
         )
         step = _get_trace(result).steps[0]
-        assert step.step_name == "group_by(category).agg"
+        assert step.step_name == "group_by(category).agg(total_price)"
 
     def test_groupby_multiple_cols_step_name(self, traced: TracedDataFrame):
         result = traced.group_by("status", "category").agg(pl.col("price").sum())
         step = _get_trace(result).steps[0]
-        assert step.step_name == "group_by(status, category).agg"
+        assert step.step_name == "group_by(status, category).agg(price)"
 
 
 # ------------------------------------------------------------------
@@ -626,7 +626,7 @@ class TestMixedPipeAndMethodChain:
 
         assert len(trace.steps) == 2
         assert trace.steps[0].step_name == "clean"
-        assert trace.steps[1].step_name == "sort"
+        assert trace.steps[1].step_name == "sort(price)"
 
     def test_method_chain_then_pipe(self, traced: TracedDataFrame):
         def aggregate(df: pl.DataFrame) -> pl.DataFrame:
@@ -636,7 +636,7 @@ class TestMixedPipeAndMethodChain:
         trace = _get_trace(result)
 
         assert len(trace.steps) == 2
-        assert trace.steps[0].step_name == "filter"
+        assert "filter(" in trace.steps[0].step_name
         assert trace.steps[1].step_name == "aggregate"
 
     def test_method_chain_then_groupby(self, traced: TracedDataFrame):
@@ -648,8 +648,8 @@ class TestMixedPipeAndMethodChain:
         trace = _get_trace(result)
 
         assert len(trace.steps) == 2
-        assert trace.steps[0].step_name == "filter"
-        assert "group_by" in trace.steps[1].step_name
+        assert "filter(" in trace.steps[0].step_name
+        assert trace.steps[1].step_name == "group_by(category).agg(total)"
 
     def test_full_mixed_pipeline(self, traced: TracedDataFrame):
         def add_revenue(df: pl.DataFrame) -> pl.DataFrame:
@@ -666,7 +666,7 @@ class TestMixedPipeAndMethodChain:
         trace = _get_trace(result)
 
         assert len(trace.steps) == 4
-        assert trace.steps[0].step_name == "filter"
+        assert "filter(" in trace.steps[0].step_name
         assert trace.steps[1].step_name == "add_revenue"
-        assert trace.steps[2].step_name == "sort"
-        assert trace.steps[3].step_name == "head"
+        assert trace.steps[2].step_name == "sort(revenue)"
+        assert trace.steps[3].step_name == "head(2)"
