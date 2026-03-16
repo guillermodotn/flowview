@@ -1,11 +1,9 @@
-"""Tests for flowview.tracer."""
-
-import contextlib
+"""Tests for flowview.tracer — @trace decorator with proxy wrapping."""
 
 import polars as pl
+import pytest
 
 import flowview as fv
-from flowview.tracer import _original_pipe
 
 
 def _clean(df: pl.DataFrame) -> pl.DataFrame:
@@ -47,32 +45,6 @@ class TestTraceDecorator:
 
         assert result.shape == (3, 2)
 
-    def test_pipe_restored_after_trace(self):
-        @fv.trace
-        def pipeline(df: pl.DataFrame) -> pl.DataFrame:
-            return df.pipe(_add_double)
-
-        df = pl.DataFrame({"value": [1, 2]})
-        pipeline(df)
-
-        # pipe should be restored to the original
-        assert pl.DataFrame.pipe is _original_pipe
-
-    def test_pipe_restored_on_error(self):
-        def bad_step(df: pl.DataFrame) -> pl.DataFrame:
-            raise ValueError("intentional error")
-
-        @fv.trace
-        def pipeline(df: pl.DataFrame) -> pl.DataFrame:
-            return df.pipe(bad_step)
-
-        df = pl.DataFrame({"value": [1]})
-        with contextlib.suppress(ValueError):
-            pipeline(df)
-
-        # pipe should still be restored
-        assert pl.DataFrame.pipe is _original_pipe
-
     def test_multi_step_pipeline(self, capsys):
         @fv.trace
         def pipeline(df: pl.DataFrame) -> pl.DataFrame:
@@ -84,7 +56,10 @@ class TestTraceDecorator:
         assert result.shape == (3, 2)
         assert list(result.columns) == ["value", "double"]
 
-    def test_no_pipe_steps(self, capsys):
+    def test_filter_now_captured(self, capsys):
+        """After proxy migration, direct method calls like .filter()
+        are captured as steps (unlike the old monkey-patching approach)."""
+
         @fv.trace
         def pipeline(df: pl.DataFrame) -> pl.DataFrame:
             return df.filter(pl.col("value") > 0)
@@ -92,8 +67,10 @@ class TestTraceDecorator:
         df = pl.DataFrame({"value": [1, 2, 3]})
         result = pipeline(df)
 
-        # Should still work, just no steps captured
         assert result.shape == (3, 1)
+        # Verify output includes trace (filter step should appear)
+        captured = capsys.readouterr()
+        assert "filter" in captured.out
 
     def test_return_value_unchanged(self):
         @fv.trace
@@ -105,3 +82,86 @@ class TestTraceDecorator:
 
         expected = df.with_columns((pl.col("value") * 2).alias("double"))
         assert result.equals(expected)
+
+    def test_result_is_real_dataframe(self):
+        """The decorator should always return a real pl.DataFrame,
+        never a TracedDataFrame proxy."""
+
+        @fv.trace
+        def pipeline(df: pl.DataFrame) -> pl.DataFrame:
+            return df.filter(pl.col("value") > 0)
+
+        df = pl.DataFrame({"value": [1, 2, 3]})
+        result = pipeline(df)
+
+        assert type(result) is pl.DataFrame
+
+    def test_method_chain_tracing(self, capsys):
+        @fv.trace
+        def pipeline(df: pl.DataFrame) -> pl.DataFrame:
+            return (
+                df.filter(pl.col("value") > 0)
+                .with_columns((pl.col("value") * 2).alias("double"))
+                .sort("double", descending=True)
+            )
+
+        df = pl.DataFrame({"value": [-1, 0, 1, 2, 3]})
+        result = pipeline(df)
+
+        assert result.shape == (3, 2)
+        assert result["double"].to_list() == [6, 4, 2]
+
+        captured = capsys.readouterr()
+        assert "filter" in captured.out
+        assert "with_columns" in captured.out
+        assert "sort" in captured.out
+
+    def test_mixed_pipe_and_method_chain(self, capsys):
+        @fv.trace
+        def pipeline(df: pl.DataFrame) -> pl.DataFrame:
+            return df.filter(pl.col("value") > 0).pipe(_add_double).sort("double")
+
+        df = pl.DataFrame({"value": [-1, 0, 1, 2, 3]})
+        result = pipeline(df)
+
+        assert result.shape == (3, 2)
+
+        captured = capsys.readouterr()
+        assert "filter" in captured.out
+        assert "_add_double" in captured.out
+        assert "sort" in captured.out
+
+    def test_error_propagates(self):
+        @fv.trace
+        def pipeline(df: pl.DataFrame) -> pl.DataFrame:
+            return df.filter(pl.col("nonexistent") > 0)
+
+        df = pl.DataFrame({"value": [1, 2, 3]})
+        with pytest.raises(pl.exceptions.ColumnNotFoundError):
+            pipeline(df)
+
+    def test_df_as_keyword_arg(self, capsys):
+        @fv.trace
+        def pipeline(*, data: pl.DataFrame) -> pl.DataFrame:
+            return data.filter(pl.col("value") > 0)
+
+        df = pl.DataFrame({"value": [1, 2, 3]})
+        result = pipeline(data=df)
+
+        assert type(result) is pl.DataFrame
+        assert result.shape == (3, 1)
+
+    def test_multiple_dataframes_only_first_traced(self):
+        """Only the first DataFrame argument should be wrapped in a proxy."""
+
+        @fv.trace
+        def pipeline(df: pl.DataFrame, other: pl.DataFrame) -> pl.DataFrame:
+            return df.join(other, on="id", how="left")
+
+        df = pl.DataFrame({"id": [1, 2, 3], "value": [10, 20, 30]})
+        other = pl.DataFrame({"id": [1, 2], "label": ["a", "b"]})
+        result = pipeline(df, other)
+
+        assert type(result) is pl.DataFrame
+        assert result.shape[0] == 3
+        assert "label" in result.columns

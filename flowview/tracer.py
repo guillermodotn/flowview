@@ -1,8 +1,7 @@
-"""Core @trace decorator that intercepts .pipe() calls."""
+"""Core @trace decorator that wraps DataFrames in a tracing proxy."""
 
 from __future__ import annotations
 
-import contextvars
 import functools
 import time
 import warnings
@@ -11,64 +10,12 @@ from typing import Any, TypeVar, overload
 
 import polars as pl
 
-from flowview.collector import capture_snapshot, timed_call
+from flowview.collector import capture_snapshot
 from flowview.models import PipelineTrace
+from flowview.proxy import TracedDataFrame, unwrap
 from flowview.renderer import render_trace
 
 F = TypeVar("F", bound=Callable[..., Any])
-
-# Context variable to track the active trace
-_active_trace: contextvars.ContextVar[PipelineTrace | None] = contextvars.ContextVar(
-    "_active_trace", default=None
-)
-_trace_config: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
-    "_trace_config", default=None
-)
-
-# Store the original pipe method
-_original_pipe = pl.DataFrame.pipe
-
-
-def _traced_pipe(
-    self: pl.DataFrame,
-    function: Callable[..., Any],
-    *args: Any,
-    **kwargs: Any,
-) -> Any:
-    """Replacement for pl.DataFrame.pipe that captures step data."""
-    current_trace = _active_trace.get(None)
-
-    if current_trace is None:
-        # No active trace — fall through to original
-        return _original_pipe(self, function, *args, **kwargs)
-
-    config = _trace_config.get(None) or {}
-    sample_rows = config.get("sample_rows", 5)
-
-    # Get the previous snapshot for diffing
-    previous = None
-    if current_trace.steps:
-        previous = current_trace.steps[-1]
-    elif current_trace.input_snapshot:
-        previous = current_trace.input_snapshot
-
-    # Execute with timing
-    result, elapsed_ms = timed_call(function, self, *args, **kwargs)
-
-    # Determine step name
-    step_name = getattr(function, "__name__", str(function))
-
-    # Capture snapshot
-    snapshot = capture_snapshot(
-        result,
-        step_name=step_name,
-        execution_time_ms=elapsed_ms,
-        sample_rows=sample_rows,
-        previous=previous,
-    )
-
-    current_trace.steps.append(snapshot)
-    return result
 
 
 @overload
@@ -98,7 +45,7 @@ def trace(
         @fv.trace
         def process(df): ...
 
-        @fv.trace(sample_rows=3)
+        @fv.trace(sample_rows=3, show_schema=True)
         def process(df): ...
 
     Args:
@@ -118,7 +65,7 @@ def trace(
 
             pipeline_trace = PipelineTrace(function_name=func.__name__)
 
-            # Capture input snapshot from the first DataFrame argument
+            # 1. Find input DataFrame, capture input snapshot
             input_df = _find_dataframe_arg(args, kwargs)
             if input_df is not None:
                 pipeline_trace.input_snapshot = capture_snapshot(
@@ -127,24 +74,20 @@ def trace(
                     sample_rows=sample_rows,
                 )
 
-            # Install the traced pipe and set context
-            token_trace = _active_trace.set(pipeline_trace)
-            token_config = _trace_config.set(config)
+            # 2. Replace DataFrame arg with proxy
+            new_args, new_kwargs = _replace_dataframe_arg(
+                args, kwargs, pipeline_trace, sample_rows
+            )
 
-            # Monkey-patch .pipe()
-            pl.DataFrame.pipe = _traced_pipe  # type: ignore[assignment]
+            # 3. Run the function (proxy traces every method call)
+            start = time.perf_counter()
+            result = func(*new_args, **new_kwargs)
+            pipeline_trace.total_time_ms = (time.perf_counter() - start) * 1000
 
-            try:
-                start = time.perf_counter()
-                result = func(*args, **kwargs)
-                pipeline_trace.total_time_ms = (time.perf_counter() - start) * 1000
-            finally:
-                # Always restore
-                pl.DataFrame.pipe = _original_pipe  # type: ignore[assignment]
-                _active_trace.reset(token_trace)
-                _trace_config.reset(token_config)
+            # 4. Unwrap result — always return real pl.DataFrame
+            result = unwrap(result)
 
-            # Render the trace — never let a rendering error lose the result
+            # 5. Render trace
             try:
                 render_trace(pipeline_trace, config)
             except Exception as e:
@@ -178,3 +121,25 @@ def _find_dataframe_arg(
         if isinstance(val, pl.DataFrame):
             return val
     return None
+
+
+def _replace_dataframe_arg(
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    trace: PipelineTrace,
+    sample_rows: int,
+) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Replace the first DataFrame in args/kwargs with a proxy."""
+    new_args = list(args)
+    for i, arg in enumerate(new_args):
+        if isinstance(arg, pl.DataFrame):
+            new_args[i] = TracedDataFrame(arg, trace, sample_rows)
+            return tuple(new_args), kwargs
+
+    new_kwargs = dict(kwargs)
+    for key, val in new_kwargs.items():
+        if isinstance(val, pl.DataFrame):
+            new_kwargs[key] = TracedDataFrame(val, trace, sample_rows)
+            return args, new_kwargs
+
+    return args, kwargs
