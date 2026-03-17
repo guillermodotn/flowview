@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import time
-from collections.abc import Callable
-from typing import Any
-
 import polars as pl
 
 from flowview.models import SchemaDiff, StepSnapshot
@@ -59,23 +55,3 @@ def compute_schema_diff(
             type_changed[col] = (before[col], after[col])
 
     return SchemaDiff(added=added, removed=removed, type_changed=type_changed)
-
-
-def timed_call(
-    fn: Callable[..., Any],
-    df: pl.DataFrame,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[pl.DataFrame, float]:
-    """Call a function with timing, returning (result, elapsed_ms)."""
-    start = time.perf_counter()
-    result = fn(df, *args, **kwargs)
-    elapsed_ms = (time.perf_counter() - start) * 1000
-
-    if not isinstance(result, pl.DataFrame):
-        raise TypeError(
-            f"Pipeline step '{fn.__name__}' returned {type(result).__name__}, "
-            f"expected polars.DataFrame"
-        )
-
-    return result, elapsed_ms

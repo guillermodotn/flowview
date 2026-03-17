@@ -1,9 +1,8 @@
 """Tests for flowview.collector."""
 
 import polars as pl
-import pytest
 
-from flowview.collector import capture_snapshot, compute_schema_diff, timed_call
+from flowview.collector import capture_snapshot, compute_schema_diff
 
 
 class TestCaptureSnapshot:
@@ -93,24 +92,3 @@ class TestComputeSchemaDiff:
         assert diff.added == ["c"]
         assert diff.removed == ["b"]
         assert diff.type_changed == {"a": ("Int64", "Float64")}
-
-
-class TestTimedCall:
-    def test_returns_result_and_time(self):
-        def add_col(df: pl.DataFrame) -> pl.DataFrame:
-            return df.with_columns(pl.lit(1).alias("new"))
-
-        df = pl.DataFrame({"a": [1, 2, 3]})
-        result, elapsed = timed_call(add_col, df)
-
-        assert isinstance(result, pl.DataFrame)
-        assert "new" in result.columns
-        assert elapsed >= 0
-
-    def test_raises_on_non_dataframe_return(self):
-        def bad_step(df: pl.DataFrame) -> int:
-            return 42  # type: ignore[return-value]
-
-        df = pl.DataFrame({"a": [1]})
-        with pytest.raises(TypeError, match=r"expected polars\.DataFrame"):
-            timed_call(bad_step, df)
