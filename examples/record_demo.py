@@ -6,80 +6,43 @@ from rich.console import Console
 import flowview as fv
 from flowview import renderer
 
-# Replace the module console with a recording one
-recording_console = Console(record=True, width=90)
+# Use a recording console for SVG export
+recording_console = Console(record=True, width=80)
 renderer.console = recording_console
 
 
-# --- Traced pipeline ---
-
-
-@fv.trace(sample_rows=3)
-def process_sales(df: pl.DataFrame) -> pl.DataFrame:
-    """Sales pipeline using method chains."""
+@fv.trace(sample_rows=2)
+def analyze_orders(df: pl.DataFrame) -> pl.DataFrame:
+    """Order analytics pipeline."""
     return (
-        df.filter(pl.col("status") == "active")
+        df.filter(pl.col("status") == "completed")
         .with_columns(
-            (pl.col("price") * pl.col("quantity")).alias("revenue"),
-            pl.col("category").str.to_lowercase().alias("category"),
+            (pl.col("price") * pl.col("qty")).alias("revenue"),
         )
-        .group_by("category")
+        .group_by("region")
         .agg(
             pl.col("revenue").sum().alias("total_revenue"),
-            pl.len().alias("order_count"),
+            pl.len().alias("orders"),
         )
         .sort("total_revenue", descending=True)
     )
 
 
-# --- Run and record ---
-
 df = pl.DataFrame(
     {
-        "status": [
-            "active",
-            "active",
-            "inactive",
-            "active",
-            "active",
-            "active",
-            "inactive",
-            "active",
-            "active",
-            "cancelled",
-        ]
-        * 100,
-        "category": [
-            "Electronics",
-            "Books",
-            "Electronics",
-            "Clothing",
-            "Books",
-            "Electronics",
-            "Clothing",
-            "Books",
-            "Electronics",
-            "Books",
-        ]
-        * 100,
-        "price": [
-            299.99,
-            14.99,
-            599.99,
-            49.99,
-            29.99,
-            149.99,
-            79.99,
-            19.99,
-            399.99,
-            9.99,
-        ]
-        * 100,
-        "quantity": [2, 5, 1, 3, 4, 1, 2, 6, 1, 3] * 100,
+        "order_id": list(range(1, 501)),
+        "region": (
+            ["North America", "Europe", "Asia", "Europe", "North America"] * 100
+        ),
+        "status": (
+            ["completed", "completed", "completed", "cancelled", "completed"] * 100
+        ),
+        "price": ([49.99, 29.99, 89.99, 19.99, 149.99] * 100),
+        "qty": ([2, 1, 3, 1, 1] * 100),
     }
 )
 
-result = process_sales(df)
+result = analyze_orders(df)
 
 # Export SVG
 svg = recording_console.export_svg(title="flowview")
