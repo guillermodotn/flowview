@@ -15,6 +15,10 @@ venv/
 # uv
 uv.lock
 
+# Linting
+.ruff_cache/
+.mypy_cache/
+
 # Testing
 .pytest_cache/
 .coverage
@@ -29,3 +33,9 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local files (not part of the package)
+TODO.md
+IDEA.md
+blog/
+research/

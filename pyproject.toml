@@ -11,7 +11,9 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
     "Topic :: Software Development :: Debuggers",
+    "Typing :: Typed",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -25,6 +27,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/guillermodotn/flowview"
+Documentation = "https://github.com/guillermodotn/flowview#readme"
 Repository = "https://github.com/guillermodotn/flowview"
 Issues = "https://github.com/guillermodotn/flowview/issues"
 
