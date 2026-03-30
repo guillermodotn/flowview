@@ -126,8 +126,12 @@ class TracedDataFrame:
         def wrapper(function: Any, *args: Any, **kwargs: Any) -> Any:
             step_name = getattr(function, "__name__", str(function))
 
+            # Unwrap any proxy args so piped functions receive real DataFrames
+            clean_args = tuple(unwrap(a) for a in args)
+            clean_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
+
             start = time.perf_counter()
-            result = function(proxy._df, *args, **kwargs)
+            result = function(proxy._df, *clean_args, **clean_kwargs)
             elapsed_ms = (time.perf_counter() - start) * 1000
 
             if isinstance(result, pl.DataFrame):
@@ -364,13 +368,25 @@ def _summarize_join(
     kwargs: dict[str, Any],
 ) -> str:
     parts: list[str] = []
-    on = kwargs.get("on") or kwargs.get("left_on")
+    on = kwargs.get("on")
     if on is not None:
-        on_key = "on" if "on" in kwargs else "left_on"
         if isinstance(on, (list, tuple)):
-            parts.append(f"{on_key}={', '.join(str(c) for c in on)}")
+            parts.append(f"on={', '.join(str(c) for c in on)}")
         else:
-            parts.append(f"{on_key}={on}")
+            parts.append(f"on={on}")
+    else:
+        left_on = kwargs.get("left_on")
+        if left_on is not None:
+            if isinstance(left_on, (list, tuple)):
+                parts.append(f"left_on={', '.join(str(c) for c in left_on)}")
+            else:
+                parts.append(f"left_on={left_on}")
+        right_on = kwargs.get("right_on")
+        if right_on is not None:
+            if isinstance(right_on, (list, tuple)):
+                parts.append(f"right_on={', '.join(str(c) for c in right_on)}")
+            else:
+                parts.append(f"right_on={right_on}")
     how = kwargs.get("how")
     if how is not None:
         parts.append(f"how={how}")

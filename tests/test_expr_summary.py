@@ -213,6 +213,24 @@ class TestSummarizeJoin:
         result = _summarize_step("join", (other,), {"left_on": "id", "how": "left"})
         assert result == "join(left_on=id, how=left)"
 
+    def test_left_on_right_on(self):
+        other = pl.DataFrame({"other_id": [1]})
+        result = _summarize_step(
+            "join",
+            (other,),
+            {"left_on": "id", "right_on": "other_id", "how": "left"},
+        )
+        assert result == "join(left_on=id, right_on=other_id, how=left)"
+
+    def test_right_on_list(self):
+        other = pl.DataFrame({"a": [1], "b": [2]})
+        result = _summarize_step(
+            "join",
+            (other,),
+            {"left_on": ["x", "y"], "right_on": ["a", "b"], "how": "inner"},
+        )
+        assert result == "join(left_on=x, y, right_on=a, b, how=inner)"
+
     def test_join_asof(self):
         other = pl.DataFrame({"id": [1]})
         result = _summarize_step("join_asof", (other,), {"on": "ts"})

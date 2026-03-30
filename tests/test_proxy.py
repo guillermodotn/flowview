@@ -548,6 +548,20 @@ class TestPipeHandling:
         assert trace.steps[0].step_name == "step_a"
         assert trace.steps[1].step_name == "step_b"
 
+    def test_pipe_unwraps_extra_args(self, sample_df: pl.DataFrame):
+        """Extra args passed to .pipe() should be unwrapped if they are proxies."""
+        other = pl.DataFrame({"id": [1, 2, 3], "label": ["a", "b", "c"]})
+        other_traced = TracedDataFrame(other, PipelineTrace(function_name="t"), 5)
+
+        def join_with(df: pl.DataFrame, right: pl.DataFrame) -> pl.DataFrame:
+            return df.join(right, on="id", how="left")
+
+        traced = TracedDataFrame(sample_df, PipelineTrace(function_name="t"), 5)
+        # Should not raise — the proxy arg must be unwrapped
+        result = traced.pipe(join_with, other_traced)
+        assert type(unwrap(result)) is pl.DataFrame
+        assert "label" in unwrap(result).columns
+
 
 # ------------------------------------------------------------------
 # GroupBy handling
