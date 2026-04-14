@@ -1,5 +1,7 @@
 """Tests for flowview.tracer — @trace decorator with proxy wrapping."""
 
+import asyncio
+
 import polars as pl
 import pytest
 
@@ -165,3 +167,51 @@ class TestTraceDecorator:
         assert type(result) is pl.DataFrame
         assert result.shape[0] == 3
         assert "label" in result.columns
+
+    def test_async_function(self):
+        """Async traced functions should return a real DataFrame."""
+
+        @fv.trace
+        async def pipeline(df: pl.DataFrame) -> pl.DataFrame:
+            return df.filter(pl.col("value") > 1)
+
+        df = pl.DataFrame({"value": [1, 2, 3]})
+        result = asyncio.run(pipeline(df))
+
+        assert type(result) is pl.DataFrame
+        assert result.shape == (2, 1)
+        assert result["value"].to_list() == [2, 3]
+
+    def test_async_with_options(self):
+        @fv.trace(sample_rows=2)
+        async def pipeline(df: pl.DataFrame) -> pl.DataFrame:
+            return df.with_columns((pl.col("value") * 2).alias("double"))
+
+        df = pl.DataFrame({"value": [10, 20]})
+        result = asyncio.run(pipeline(df))
+
+        assert type(result) is pl.DataFrame
+        assert "double" in result.columns
+
+    def test_nested_trace_no_double_wrapping(self, capsys):
+        """Nested @fv.trace should not double-wrap the proxy."""
+
+        @fv.trace
+        def inner(df: pl.DataFrame) -> pl.DataFrame:
+            return df.filter(pl.col("value") > 1)
+
+        @fv.trace
+        def outer(df: pl.DataFrame) -> pl.DataFrame:
+            return inner(df)
+
+        df = pl.DataFrame({"value": [1, 2, 3]})
+        result = outer(df)
+
+        assert type(result) is pl.DataFrame
+        assert result.shape == (2, 1)
+
+    def test_unwrap_exported(self):
+        """unwrap() should be accessible from the public API."""
+        assert hasattr(fv, "unwrap")
+        df = pl.DataFrame({"a": [1]})
+        assert fv.unwrap(df) is df

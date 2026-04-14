@@ -113,7 +113,6 @@ There is no monkey-patching and no global state. Each decorated call is fully is
 ## Limitations
 
 - **LazyFrame** is not supported — `df.lazy()` exits the proxy. Only eager DataFrames are traced.
-- **GroupBy shortcuts** like `.count()`, `.sum()`, `.first()` on a GroupBy object are not traced — use `.agg()` instead.
 - **Pipe internals** are not individually traced — `df.pipe(fn)` produces a single step named after `fn`, not one step per operation inside `fn`.
 - **IDE autocomplete** may not show DataFrame methods inside the decorated function body.
 - **`type(df)`** returns `TracedDataFrame` inside the decorated function. `isinstance(df, pl.DataFrame)` works correctly.

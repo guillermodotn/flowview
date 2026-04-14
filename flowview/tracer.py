@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import time
 import warnings
@@ -55,8 +56,14 @@ def trace(
     """
 
     def decorator(func: F) -> F:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def _setup(
+            args: tuple[Any, ...], kwargs: dict[str, Any]
+        ) -> tuple[
+            dict[str, Any],
+            PipelineTrace,
+            tuple[Any, ...],
+            dict[str, Any],
+        ]:
             config = {
                 "sample_rows": sample_rows,
                 "show_sample": show_sample,
@@ -65,7 +72,6 @@ def trace(
 
             pipeline_trace = PipelineTrace(function_name=func.__name__)
 
-            # 1. Find input DataFrame, capture input snapshot
             input_df = _find_dataframe_arg(args, kwargs)
             if input_df is not None:
                 pipeline_trace.input_snapshot = capture_snapshot(
@@ -74,20 +80,21 @@ def trace(
                     sample_rows=sample_rows,
                 )
 
-            # 2. Replace DataFrame arg with proxy
             new_args, new_kwargs = _replace_dataframe_arg(
                 args, kwargs, pipeline_trace, sample_rows
             )
 
-            # 3. Run the function (proxy traces every method call)
-            start = time.perf_counter()
-            result = func(*new_args, **new_kwargs)
-            pipeline_trace.total_time_ms = (time.perf_counter() - start) * 1000
+            return config, pipeline_trace, new_args, new_kwargs
 
-            # 4. Unwrap result — always return real pl.DataFrame
+        def _finish(
+            result: Any,
+            pipeline_trace: PipelineTrace,
+            config: dict[str, Any],
+            elapsed_ms: float,
+        ) -> Any:
+            pipeline_trace.total_time_ms = elapsed_ms
             result = unwrap(result)
 
-            # 5. Render trace
             try:
                 render_trace(pipeline_trace, config)
             except Exception as e:
@@ -98,6 +105,26 @@ def trace(
                 )
 
             return result
+
+        if asyncio.iscoroutinefunction(func):
+
+            @functools.wraps(func)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                config, pipeline_trace, new_args, new_kwargs = _setup(args, kwargs)
+                start = time.perf_counter()
+                result = await func(*new_args, **new_kwargs)
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                return _finish(result, pipeline_trace, config, elapsed_ms)
+
+            return async_wrapper  # type: ignore[return-value]
+
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            config, pipeline_trace, new_args, new_kwargs = _setup(args, kwargs)
+            start = time.perf_counter()
+            result = func(*new_args, **new_kwargs)
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            return _finish(result, pipeline_trace, config, elapsed_ms)
 
         return wrapper  # type: ignore[return-value]
 
@@ -116,10 +143,10 @@ def _find_dataframe_arg(
     """Find the first pl.DataFrame in the arguments."""
     for arg in args:
         if isinstance(arg, pl.DataFrame):
-            return arg
+            return unwrap(arg)
     for val in kwargs.values():
         if isinstance(val, pl.DataFrame):
-            return val
+            return unwrap(val)
     return None
 
 
@@ -133,13 +160,16 @@ def _replace_dataframe_arg(
     new_args = list(args)
     for i, arg in enumerate(new_args):
         if isinstance(arg, pl.DataFrame):
-            new_args[i] = TracedDataFrame(arg, trace, sample_rows)
+            # Unwrap any existing proxy to avoid double-wrapping
+            real_df = unwrap(arg)
+            new_args[i] = TracedDataFrame(real_df, trace, sample_rows)
             return tuple(new_args), kwargs
 
     new_kwargs = dict(kwargs)
     for key, val in new_kwargs.items():
         if isinstance(val, pl.DataFrame):
-            new_kwargs[key] = TracedDataFrame(val, trace, sample_rows)
+            real_df = unwrap(val)
+            new_kwargs[key] = TracedDataFrame(real_df, trace, sample_rows)
             return args, new_kwargs
 
     return args, kwargs

@@ -39,6 +39,13 @@ class TracedDataFrame:
         """Make ``isinstance(proxy, pl.DataFrame)`` return ``True``."""
         return pl.DataFrame  # type: ignore[return-value]
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Prevent attribute assignment on the proxy."""
+        raise AttributeError(
+            "TracedDataFrame does not support attribute assignment. "
+            "Use Polars methods like .rename() instead."
+        )
+
     # ------------------------------------------------------------------
     # Dunder methods (not intercepted by __getattr__)
     # ------------------------------------------------------------------

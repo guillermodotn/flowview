@@ -27,6 +27,7 @@ Usage:
 """
 
 from flowview._version import __version__
+from flowview.proxy import unwrap
 from flowview.tracer import trace
 
-__all__ = ["__version__", "trace"]
+__all__ = ["__version__", "trace", "unwrap"]

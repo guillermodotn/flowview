@@ -127,6 +127,26 @@ class TestUnwrap:
 
 
 # ------------------------------------------------------------------
+# __setattr__ guard
+# ------------------------------------------------------------------
+
+
+class TestSetAttrGuard:
+    def test_setattr_raises(self, traced: TracedDataFrame):
+        with pytest.raises(AttributeError, match="does not support"):
+            traced.foo = "bar"
+
+    def test_setattr_internal_raises(self, traced: TracedDataFrame):
+        with pytest.raises(AttributeError, match="does not support"):
+            traced._df = "broken"
+
+    def test_init_still_works(self, sample_df: pl.DataFrame):
+        """__init__ uses object.__setattr__ so construction still works."""
+        proxy = TracedDataFrame(sample_df, PipelineTrace(function_name="t"), 5)
+        assert proxy._df is sample_df
+
+
+# ------------------------------------------------------------------
 # Method tracing — filter
 # ------------------------------------------------------------------
 
